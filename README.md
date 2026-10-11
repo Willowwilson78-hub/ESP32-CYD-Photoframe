@@ -4,6 +4,26 @@
 
 High-performance electronic photo frame and animation (GIF/Video) player optimized for the **ESP32-2432S028 (CYD)** board featuring an ILI9341 display, XPT2046 touch controller, and an SD card slot. This project replaces the traditional, unstable `AnimatedGIF` library with a robust folder-based JPG frame runner, eliminating screen artifacts and providing smooth playback speeds.
 
+### 🛠️ How to Install & Setup
+Choose your preferred development environment:
+
+#### Option A: PlatformIO (Recommended - Easiest)
+1. Clone or download this repository.
+2. Open the project folder in **Visual Studio Code** with the PlatformIO extension installed.
+3. PlatformIO will automatically fetch all required dependencies (`TFT_eSPI`, `TJpg_Decoder`) and board configurations via `platformio.ini`.
+4. Connect your ESP32 CYD via USB, compile, and upload.
+
+#### Option B: Arduino IDE
+1. Open **Arduino IDE**, go to **File > Preferences**, and add the ESP32 board manager URL:
+   `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
+2. Go to **Tools > Board > Boards Manager**, search for `esp32` by Espressif Systems, and install version `2.x.x` or higher.
+3. Select your board (usually **ESP32 Dev Module** or equivalent ESP32-WROOM-32).
+4. Install the required libraries via **Library Manager**:
+   * `TFT_eSPI` (Bodmer)
+   * `TJpg_Decoder` (Bodmer)
+5. **Important TFT_eSPI Configuration:** You must configure `User_Setup.h` inside your `TFT_eSPI` library folder to match the CYD hardware pins (ILI9341 display, XPT2046 touch, and SD card SPI pins).
+6. Compile and upload the firmware to your board.
+
 ### 🚀 1. Quick Conversion Scripts (Just Drop & Run)
 
 You don't need complex setups on your PC. Simply drop the conversion scripts into your MicroSD card alongside your media files:
