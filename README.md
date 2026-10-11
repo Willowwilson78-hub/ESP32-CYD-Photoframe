@@ -1,6 +1,6 @@
 # 🖼️ ESP32 CYD Custom Photo & Animation Frame
 
-<img width="12000" height="9000" alt="1791707837631" src="https://github.com/user-attachments/assets/893efb1f-6b02-4103-86ab-b1a425507bd5" />
+<img width="9346" height="5451" alt="1791710886704" src="https://github.com/user-attachments/assets/657ef804-0049-4a1a-9e7d-ef228b0ccdc2" />
 
 High-performance electronic photo frame and animation (GIF/Video) player optimized for the **ESP32-2432S028 (CYD)** board featuring an ILI9341 display, XPT2046 touch controller, and an SD card slot. This project replaces the traditional, unstable `AnimatedGIF` library with a robust folder-based JPG frame runner, eliminating screen artifacts and providing smooth playback speeds.
 
