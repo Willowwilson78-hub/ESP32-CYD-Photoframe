@@ -366,9 +366,9 @@ void playVideoStep() {
     const uint8_t* frame = nullptr;
     size_t size = 0;
     if (!mjpegNextFrame(videoFile, frame, size)) {
-
-        closeVideo();
-        fileIndex = (fileIndex + 1) % videoFiles.size();
+        videoFile.seek(0);
+        mjLen = 0;
+        mjPos = 0;
         return;
     }
 
