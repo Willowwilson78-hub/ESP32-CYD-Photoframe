@@ -11,20 +11,24 @@ TFT_eSPI tft;
 
 static constexpr uint32_t SERIAL_BAUD = 115200;
 static constexpr uint32_t DEFAULT_INTERVAL_MS = 5000;
-static constexpr uint32_t DEFAULT_ANIM_INTERVAL_MS = 100; // Tốc độ mặc định cho animation (ms)
 static constexpr uint8_t DEFAULT_BRIGHTNESS = 20;
 static constexpr size_t MAX_COMMAND_LENGTH = 127;
+
+static constexpr size_t MJ_BUF_SIZE = 64 * 1024;
+static constexpr size_t MJ_BUF_MIN  = 24 * 1024;
+static constexpr size_t NPOS = (size_t)-1;
+
+static const char* VIDEO_FOLDER = "/mjpeg";
 
 constexpr uint8_t BUTTON_PIN = 0;
 
 enum DeviceMode : uint8_t {
     MODE_PHOTO = 0,
-    MODE_GIF = 1
+    MODE_VIDEO = 1
 };
 
 struct Config {
     uint32_t intervalMs = DEFAULT_INTERVAL_MS;
-    uint32_t animIntervalMs = DEFAULT_ANIM_INTERVAL_MS; // Thêm cấu hình tốc độ animation riêng
     uint8_t brightness = DEFAULT_BRIGHTNESS;
     uint8_t red = 255;
     uint8_t green = 0;
@@ -49,11 +53,9 @@ constexpr uint8_t RGB_B_CH = 2;
 bool rgbReady = false;
 
 std::vector<String> jpgFiles;
-std::vector<String> animFolders;        // Danh sách các thư mục chứa chuỗi frame (như anim_XiaomiSu7)
-std::vector<String> currentAnimFrames;   // Danh sách các ảnh bên trong thư mục animation hiện tại
+std::vector<String> videoFiles;
 
 size_t fileIndex = 0;
-size_t animFrameIndex = 0;
 uint32_t lastImageTime = 0;
 bool fileNeedsUpdate = true;
 
@@ -62,6 +64,18 @@ bool lastButtonState = HIGH;
 
 char commandBuffer[MAX_COMMAND_LENGTH + 1];
 size_t commandLength = 0;
+
+File videoFile;
+bool videoOpen = false;
+bool videoGeomReady = false;
+int16_t videoX = 0, videoY = 0;
+uint32_t videoFrames = 0;
+uint32_t videoStartMs = 0;
+
+uint8_t* mjBuf = nullptr;
+size_t mjCap = 0;
+size_t mjLen = 0;
+size_t mjPos = 0;
 
 void applyRgb() {
     if (!rgbReady) return;
@@ -99,7 +113,6 @@ void saveConfigToSD() {
         return;
     }
     f.printf("interval=%u\n", config.intervalMs);
-    f.printf("animInterval=%u\n", config.animIntervalMs); // Lưu tốc độ animation vào thẻ SD
     f.printf("brightness=%u\n", config.brightness);
     f.printf("mode=%u\n", (uint8_t)config.mode);
     f.printf("red=%u\n", config.red);
@@ -129,7 +142,6 @@ void loadConfigFromSD() {
         val.trim();
 
         if (key == "interval") config.intervalMs = val.toInt();
-        else if (key == "animInterval") config.animIntervalMs = val.toInt(); // Đọc tốc độ animation từ thẻ SD
         else if (key == "brightness") config.brightness = val.toInt();
         else if (key == "mode") config.mode = (DeviceMode)val.toInt();
         else if (key == "red") config.red = val.toInt();
@@ -142,21 +154,35 @@ void loadConfigFromSD() {
     Serial.println("OK: Configuration loaded from SD card");
 }
 
-// Hàm tải danh sách các frame ảnh bên trong thư mục animation
-void loadAnimFrames(const String& folderPath) {
-    currentAnimFrames.clear();
-    File dir = SD.open(folderPath.c_str());
-    if (!dir || !dir.isDirectory()) return;
+static String baseNameOf(const char* path) {
+    String s(path);
+    int i = s.lastIndexOf('/');
+    return (i >= 0) ? s.substring(i + 1) : s;
+}
+
+static void scanDir(const char* dirPath, bool collectPhotos) {
+    File dir = SD.open(dirPath);
+    if (!dir || !dir.isDirectory()) {
+        if (dir) dir.close();
+        return;
+    }
+
+    String prefix(dirPath);
+    if (!prefix.endsWith("/")) prefix += "/";
 
     File file = dir.openNextFile();
     while (file) {
         if (!file.isDirectory()) {
-            String fileName = String(file.name());
-            String lowerName = fileName;
-            lowerName.toLowerCase();
-            if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg") || lowerName.endsWith(".png")) {
-                String fullPath = folderPath + "/" + fileName;
-                currentAnimFrames.push_back(fullPath);
+            String name = baseNameOf(file.name());
+            String lower = name;
+            lower.toLowerCase();
+
+            if (!name.startsWith(".")) {
+                if (lower.endsWith(".mjpeg") || lower.endsWith(".mjpg")) {
+                    if (file.size() > 0) videoFiles.push_back(prefix + name);
+                } else if (collectPhotos && (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) {
+                    jpgFiles.push_back(prefix + name);
+                }
             }
         }
         File nextFile = dir.openNextFile();
@@ -164,56 +190,26 @@ void loadAnimFrames(const String& folderPath) {
         file = nextFile;
     }
     dir.close();
-    std::sort(currentAnimFrames.begin(), currentAnimFrames.end());
-    animFrameIndex = 0;
 }
 
-void scanImageFiles() {
-    jpgFiles.clear();
-    animFolders.clear();
-    
-    File root = SD.open("/");
-    if (!root || !root.isDirectory()) {
-        Serial.println("ERR: Failed to open SD card root directory!");
-        return;
-    }
+void closeVideo();
 
-    File file = root.openNextFile();
-    while (file) {
-        String fileName = String(file.name());
-        if (file.isDirectory()) {
-            String lowerDir = fileName;
-            lowerDir.toLowerCase();
-            if (lowerDir.startsWith("anim") || lowerDir.startsWith("gif")) {
-                animFolders.push_back("/" + fileName);
-            }
-        } else {
-            String lowerName = fileName;
-            lowerName.toLowerCase();
-            if (!fileName.startsWith("/")) {
-                fileName = "/" + fileName;
-            }
-            if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
-                jpgFiles.push_back(fileName);
-            }
-        }
-        File nextFile = root.openNextFile();
-        file.close();
-        file = nextFile;
-    }
-    root.close();
+void scanImageFiles() {
+    closeVideo();
+    jpgFiles.clear();
+    videoFiles.clear();
+
+    scanDir("/", true);
+    scanDir(VIDEO_FOLDER, false);
 
     std::sort(jpgFiles.begin(), jpgFiles.end());
-    std::sort(animFolders.begin(), animFolders.end());
-    
-    Serial.printf("Total files -> JPG: %u, Animation Folders: %u\n", (unsigned)jpgFiles.size(), (unsigned)animFolders.size());
+    std::sort(videoFiles.begin(), videoFiles.end());
 
-    if (config.mode == MODE_GIF && !animFolders.empty()) {
-        if (fileIndex >= animFolders.size()) fileIndex = 0;
-        loadAnimFrames(animFolders[fileIndex]);
-    } else {
-        if (fileIndex >= jpgFiles.size()) fileIndex = 0;
-    }
+    Serial.printf("Total files -> JPG: %u, MJPEG videos: %u\n",
+                  (unsigned)jpgFiles.size(), (unsigned)videoFiles.size());
+
+    size_t count = (config.mode == MODE_VIDEO) ? videoFiles.size() : jpgFiles.size();
+    if (fileIndex >= count) fileIndex = 0;
 }
 
 void setBrightness(uint8_t percent) {
@@ -227,14 +223,171 @@ bool tft_output(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) 
     return true;
 }
 
+static size_t findMarker(size_t from, uint8_t code) {
+    while (from + 1 < mjLen) {
+        const uint8_t* p = (const uint8_t*)memchr(mjBuf + from, 0xFF, mjLen - from - 1);
+        if (!p) return NPOS;
+        size_t i = (size_t)(p - mjBuf);
+        if (mjBuf[i + 1] == code) return i;
+        from = i + 1;
+    }
+    return NPOS;
+}
+
+enum FillResult { FILL_OK, FILL_EOF, FILL_FULL };
+
+static FillResult mjFill(File& f) {
+    if (mjPos > 0) {
+        mjLen -= mjPos;
+        memmove(mjBuf, mjBuf + mjPos, mjLen);
+        mjPos = 0;
+    }
+    if (mjLen >= mjCap) return FILL_FULL;
+    int n = f.read(mjBuf + mjLen, mjCap - mjLen);
+    if (n <= 0) return FILL_EOF;
+    mjLen += (size_t)n;
+    return FILL_OK;
+}
+
+static bool mjpegNextFrame(File& f, const uint8_t*& frame, size_t& size) {
+    size_t searchFrom = mjPos;
+    bool haveSoi = false;
+
+    for (;;) {
+        if (!haveSoi) {
+            size_t s = findMarker(searchFrom, 0xD8);
+            if (s != NPOS) {
+                haveSoi = true;
+                mjPos = s;
+                searchFrom = s + 2;
+            } else {
+
+                mjPos = (mjLen > 0) ? mjLen - 1 : 0;
+                searchFrom = mjPos;
+            }
+        }
+
+        if (haveSoi) {
+            size_t e = findMarker(searchFrom, 0xD9);
+            if (e != NPOS) {
+                frame = mjBuf + mjPos;
+                size = e + 2 - mjPos;
+                mjPos = e + 2;
+                return true;
+            }
+
+            size_t resume = (mjLen > 0) ? mjLen - 1 : 0;
+            searchFrom = std::max(resume, mjPos + 2);
+        }
+
+        size_t shift = mjPos;
+        FillResult r = mjFill(f);
+        searchFrom -= shift;
+
+        if (r == FILL_EOF) return false;
+        if (r == FILL_FULL) {
+
+            mjPos = std::min<size_t>(2, mjLen);
+            searchFrom = mjPos;
+            haveSoi = false;
+        }
+    }
+}
+
+void closeVideo() {
+    if (videoOpen) {
+        videoFile.close();
+        videoOpen = false;
+        uint32_t ms = millis() - videoStartMs;
+        if (videoFrames > 0 && ms > 0) {
+            Serial.printf("Video done: %u frames, %.1f fps\n", (unsigned)videoFrames, 1000.0f * videoFrames / ms);
+        }
+    }
+    mjLen = 0;
+    mjPos = 0;
+}
+
+bool openVideo() {
+    closeVideo();
+    if (videoFiles.empty() || !mjBuf) return false;
+    if (fileIndex >= videoFiles.size()) fileIndex = 0;
+
+    const char* path = videoFiles[fileIndex].c_str();
+    videoFile = SD.open(path, FILE_READ);
+    if (!videoFile || videoFile.isDirectory()) {
+        Serial.printf("ERR: Cannot open video %s\n", path);
+        if (videoFile) videoFile.close();
+        return false;
+    }
+
+    Serial.printf("Playing %s (%u bytes)\n", path, (unsigned)videoFile.size());
+    mjLen = 0;
+    mjPos = 0;
+    videoOpen = true;
+    videoGeomReady = false;
+    videoFrames = 0;
+    videoStartMs = millis();
+    tft.fillScreen(TFT_BLACK);
+    return true;
+}
+
+static void setupVideoGeometry(const uint8_t* frame, size_t size) {
+    videoGeomReady = true;
+    videoX = 0;
+    videoY = 0;
+    TJpgDec.setJpgScale(1);
+
+    uint16_t w = 0, h = 0;
+    if (TJpgDec.getJpgSize(&w, &h, frame, (uint32_t)size) != JDR_OK) return;
+
+    uint8_t scale = 1;
+    while (scale < 8 && (w / scale > tft.width() || h / scale > tft.height())) scale <<= 1;
+    TJpgDec.setJpgScale(scale);
+
+    int sw = w / scale;
+    int sh = h / scale;
+    videoX = std::max(0, (tft.width() - sw) / 2);
+    videoY = std::max(0, (tft.height() - sh) / 2);
+    Serial.printf("Video frame %ux%u, scale 1/%u\n", w, h, scale);
+}
+
+void playVideoStep() {
+    if (videoFiles.empty()) return;
+
+    if (fileNeedsUpdate || !videoOpen) {
+        fileNeedsUpdate = false;
+        if (!openVideo()) {
+            fileIndex = (fileIndex + 1) % videoFiles.size();
+            delay(200);
+            return;
+        }
+    }
+
+    const uint8_t* frame = nullptr;
+    size_t size = 0;
+    if (!mjpegNextFrame(videoFile, frame, size)) {
+
+        closeVideo();
+        fileIndex = (fileIndex + 1) % videoFiles.size();
+        return;
+    }
+
+    if (!videoGeomReady) setupVideoGeometry(frame, size);
+
+    tft.startWrite();
+    TJpgDec.drawJpg(videoX, videoY, frame, (uint32_t)size);
+    tft.endWrite();
+
+    videoFrames++;
+}
+
 void printHelp() {
     Serial.println("\n--- CYD PhotoFrame Commands ---");
     Serial.println("   help");
     Serial.println("   status");
     Serial.println("   scan");
     Serial.println("   interval <milliseconds>       (Time between photo slides)");
-    Serial.println("   animinterval <milliseconds>   (Speed/delay between animation frames, e.g., 50)");
-    Serial.println("   mode <photo|gif>");
+    Serial.println("   mode <photo|video>            ('gif' is an alias of 'video')");
     Serial.println("   rotation <0-3>");
     Serial.println("   rgb <HEX> or <0-255> <0-255> <0-255>");
     Serial.println("   rgb off");
@@ -245,12 +398,13 @@ void printHelp() {
 }
 
 void printStatus() {
-    Serial.printf("Mode: %s\n", config.mode == MODE_PHOTO ? "Photo (JPG)" : "Animation Folders");
+    Serial.printf("Mode: %s\n", config.mode == MODE_PHOTO ? "Photo (JPG)" : "Video (MJPEG)");
     Serial.printf("Rotation: %u\n", config.rotation);
     Serial.printf("Photo Interval: %u ms\n", config.intervalMs);
-    Serial.printf("Animation Interval (Speed): %u ms\n", config.animIntervalMs);
     Serial.printf("RGB: R=%u, G=%u, B=%u (%s)\n", config.red, config.green, config.blue, config.rgbEnabled ? "On" : "Off");
-    Serial.printf("Files -> JPG: %u, Anim Folders: %u (Current Index: %u)\n", (unsigned)jpgFiles.size(), (unsigned)animFolders.size(), (unsigned)fileIndex);
+    Serial.printf("Files -> JPG: %u, MJPEG: %u (Current Index: %u)\n",
+                  (unsigned)jpgFiles.size(), (unsigned)videoFiles.size(), (unsigned)fileIndex);
+    Serial.printf("Free heap: %u, MJPEG buffer: %u bytes\n", (unsigned)ESP.getFreeHeap(), (unsigned)mjCap);
 }
 
 bool parseLong(const char* s, long& result) {
@@ -265,9 +419,9 @@ void requestNextFile(int direction) {
         if (jpgFiles.empty()) return;
         fileIndex = (direction > 0) ? (fileIndex + 1) % jpgFiles.size() : (fileIndex + jpgFiles.size() - 1) % jpgFiles.size();
     } else {
-        if (animFolders.empty()) return;
-        fileIndex = (direction > 0) ? (fileIndex + 1) % animFolders.size() : (fileIndex + animFolders.size() - 1) % animFolders.size();
-        loadAnimFrames(animFolders[fileIndex]);
+        if (videoFiles.empty()) return;
+        fileIndex = (direction > 0) ? (fileIndex + 1) % videoFiles.size() : (fileIndex + videoFiles.size() - 1) % videoFiles.size();
+        closeVideo();
     }
     fileNeedsUpdate = true;
     lastImageTime = millis();
@@ -298,18 +452,19 @@ void handleCommand(char* line) {
         Serial.println("OK: Configuration saved to SD card");
     } else if (!strcmp(argv[0], "mode") && argc == 2) {
         if (!strcmp(argv[1], "photo")) {
+            closeVideo();
             config.mode = MODE_PHOTO;
             fileIndex = 0;
             fileNeedsUpdate = true;
             saveConfigToSD();
             Serial.println("OK: Switched to Photo mode (saved)");
-        } else if (!strcmp(argv[1], "gif")) {
-            config.mode = MODE_GIF;
+        } else if (!strcmp(argv[1], "video") || !strcmp(argv[1], "gif")) {
+            closeVideo();
+            config.mode = MODE_VIDEO;
             fileIndex = 0;
-            if (!animFolders.empty()) loadAnimFrames(animFolders[fileIndex]);
             fileNeedsUpdate = true;
             saveConfigToSD();
-            Serial.println("OK: Switched to Animation mode (saved)");
+            Serial.println("OK: Switched to Video mode (saved)");
         }
     } else if (!strcmp(argv[0], "rotation") && argc == 2) {
         long val;
@@ -331,7 +486,7 @@ void handleCommand(char* line) {
         } else {
             const char* hexStr = argv[1];
             if (hexStr[0] == '#') hexStr++;
-            
+
             if (strlen(hexStr) == 6) {
                 long number = strtol(hexStr, NULL, 16);
                 config.red = (number >> 16) & 0xFF;
@@ -376,15 +531,6 @@ void handleCommand(char* line) {
         } else {
             Serial.println("ERR: Minimum photo interval is 100 ms");
         }
-    } else if (!strcmp(argv[0], "animinterval") && argc == 2) {
-        long val;
-        if (parseLong(argv[1], val) && val >= 10) { // Cho phép tốc độ khung hình từ 10ms trở lên
-            config.animIntervalMs = (uint32_t)val;
-            saveConfigToSD();
-            Serial.printf("OK: Animation frame interval changed to %u ms (saved)\n", config.animIntervalMs);
-        } else {
-            Serial.println("ERR: Minimum animation interval is 10 ms");
-        }
     }
 }
 
@@ -422,7 +568,7 @@ void handlePhysicalButton() {
 void setup() {
     Serial.begin(SERIAL_BAUD);
 
-    pinMode(BUTTON_PIN, INPUT_PULLUP); 
+    pinMode(BUTTON_PIN, INPUT_PULLUP);
 
     if (!initSDCard()) {
         Serial.println("ERR: SD card initialization failed");
@@ -437,6 +583,12 @@ void setup() {
 
     setBrightness(config.brightness);
     initRGB();
+
+    for (size_t cap = MJ_BUF_SIZE; cap >= MJ_BUF_MIN && !mjBuf; cap /= 2) {
+        mjBuf = (uint8_t*)malloc(cap);
+        if (mjBuf) mjCap = cap;
+    }
+    if (!mjBuf) Serial.println("WARN: Cannot allocate MJPEG buffer, video mode disabled");
 
     scanImageFiles();
 
@@ -473,18 +625,7 @@ void loop() {
             }
         }
     } else {
-        // Chế độ Animation Folder: Chạy tuần tự các frame với tốc độ cấu hình động `config.animIntervalMs`
-        if (!animFolders.empty() && !currentAnimFrames.empty()) {
-            if (fileNeedsUpdate || (now - lastImageTime >= config.animIntervalMs)) {
-                lastImageTime = now;
-                fileNeedsUpdate = false;
-
-                const char* path = currentAnimFrames[animFrameIndex].c_str();
-                TJpgDec.drawSdJpg(0, 0, path);
-
-                animFrameIndex = (animFrameIndex + 1) % currentAnimFrames.size();
-            }
-        }
+        playVideoStep();
     }
     yield();
 }
