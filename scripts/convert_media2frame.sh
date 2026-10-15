@@ -1,28 +1,46 @@
 #!/bin/bash
 
+FPS="${FPS:-24}"
+QUALITY="${QUALITY:-5}"
+OUT_DIR="mjpeg"
+
+shopt -s nullglob nocaseglob
+
+if ! command -v ffmpeg >/dev/null 2>&1; then
+    echo "ERROR: ffmpeg not found. Please install ffmpeg first."
+    exit 1
+fi
+
+mkdir -p "$OUT_DIR"
+converted=0
+
 for media in *.mp4 *.avi *.mkv *.mov *.webm *.gif; do
-    [ -e "$media" ] || continue
+    [ -f "$media" ] || continue
     filename=$(basename -- "$media")
     name="${filename%.*}"
 
-    target_dir="anim_${name}"
+    target="${OUT_DIR}/${name}.mjpeg"
 
-    if [ -d "$target_dir" ] && [ "$(ls -A "$target_dir"/*.jpg 2>/dev/null)" ]; then
-        echo "Skipping: '$media' already exists."
+    if [ -s "$target" ]; then
+        echo "Skipping: '$media' already converted -> $target"
         continue
     fi
 
-    mkdir -p "$target_dir"
+    echo "Converting: $media -> $target (${FPS} fps, q=${QUALITY})"
 
-    if [[ "$media" == *.gif ]]; then
-        echo "Extracting frames from GIF: $media -> $target_dir/"
-        ffmpeg -y -i "$media" -fps_mode passthrough -vf "scale=320:240:force_original_aspect_ratio=increase,crop=320:240" -q:v 3 "${target_dir}/%04d.jpg"
+    tmp="${target}.tmp"
+    if ffmpeg -y -loglevel error -stats -i "$media" \
+        -an \
+        -vf "fps=${FPS},scale=320:240:force_original_aspect_ratio=increase,crop=320:240" \
+        -c:v mjpeg -pix_fmt yuvj420p -q:v "$QUALITY" \
+        -f mjpeg "$tmp"; then
+        mv -f "$tmp" "$target"
+        echo "Done: $target"
+        converted=$((converted + 1))
     else
-        echo "Splitting video into JPG frames: $media -> $target_dir/"
-        ffmpeg -y -i "$media" -vf "fps=15,scale=320:240:force_original_aspect_ratio=increase,crop=320:240" -q:v 3 "${target_dir}/%04d.jpg"
+        rm -f "$tmp"
+        echo "FAILED: $media"
     fi
-
-    echo "Done: $target_dir"
 done
 
-echo "All done!"
+echo "All done! Converted $converted file(s) into ./$OUT_DIR/"
