@@ -1,7 +1,7 @@
 #!/bin/bash
 
-FPS="${FPS:-24}"
-QUALITY="${QUALITY:-5}"
+FPS="${FPS:-36}"
+QUALITY="${QUALITY:-6}"
 OUT_DIR="mjpeg"
 
 shopt -s nullglob nocaseglob
