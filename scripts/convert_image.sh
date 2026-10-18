@@ -24,4 +24,3 @@ for img in *.jpg *.jpeg *.png *.webp; do
 done
 
 echo "Done! Copy the images from the 'converted_landscape' folder to your SD card."
-# Copyright (c) 2026 by WillowWilson78-hub
