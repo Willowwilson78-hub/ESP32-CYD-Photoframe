@@ -1,7 +1,9 @@
 #!/bin/bash
 
-FPS="${FPS:-36}"
-QUALITY="${QUALITY:-6}"
+# IMPORTANT: Keep FPS strictly between 10-15 (Recommended: 13).
+# Setting higher FPS (e.g. 24/30) will cause severe slow-motion & lag on ESP32!
+FPS="${FPS:-15}"
+QUALITY="${QUALITY:-2}" # QUALITY: Lower is better quality (q=2 to 4 recommended for crisp visuals).
 OUT_DIR="mjpeg"
 
 shopt -s nullglob nocaseglob
@@ -44,3 +46,4 @@ for media in *.mp4 *.avi *.mkv *.mov *.webm *.gif; do
 done
 
 echo "All done! Converted $converted file(s) into ./$OUT_DIR/"
+# Copyright (c) 2026 by WillowWilson78-hub
