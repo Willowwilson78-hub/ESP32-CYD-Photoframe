@@ -46,4 +46,4 @@ for media in *.mp4 *.avi *.mkv *.mov *.webm *.gif; do
 done
 
 echo "All done! Converted $converted file(s) into ./$OUT_DIR/"
-# Copyright (c) 2026 by WillowWilson78-hub
+
