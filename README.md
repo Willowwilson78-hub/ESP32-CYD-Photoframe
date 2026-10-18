@@ -4,6 +4,8 @@
 
 High-performance electronic photo frame and video (GIF/Video) player optimized for the **ESP32-2432S028 (CYD)** board featuring an ILI9341 display, XPT2046 touch controller, and an SD card slot. This project replaces the traditional, unstable `AnimatedGIF` library, and the slow approach of storing thousands of separate JPG frames, with a streaming **MJPEG** player: each video is a single `.mjpeg` file that is read sequentially from the SD card and decoded straight from RAM. The result is smoother playback, no screen artifacts, and almost no loading time.
 
+# 🖼️ [Demo Video](https://files.catbox.moe/728548.mp4)
+
 ### 🛠️ How to Install & Setup
 Choose your preferred development environment:
 
