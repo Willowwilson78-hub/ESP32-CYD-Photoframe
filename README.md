@@ -13,7 +13,7 @@ No cloud, no app, no subscription — just an SD card and a $10 display.
 ![Media](https://img.shields.io/badge/media-MJPEG%20%2B%20JPEG-important)
 ![Requires](https://img.shields.io/badge/requires-ffmpeg-3C873A?logo=ffmpeg&logoColor=white)
 
-[▶️ Watch the demo](https://files.catbox.moe/728548.mp4) · [⚡ Quick Start](#-quick-start) · [🎛️ Controls](https://github.com/Willowwilson78-hub/ESP32-CYD-Photoframe#%EF%B8%8F-controls) · [🩺 Troubleshooting](#-troubleshooting)
+[▶️ Watch the demo](https://files.catbox.moe/728548.mp4) · [⚡ Quick Start](#-quick-start) · [🎛️ Controls](#controls) · [🩺 Troubleshooting](#-troubleshooting)
 </div>
 
 <img width="9346" height="5451" alt="ESP32 CYD photo frame in action" src="https://github.com/user-attachments/assets/657ef804-0049-4a1a-9e7d-ef228b0ccdc2" />
@@ -165,6 +165,8 @@ Change only the number and keep the rest of the line — quotes, braces and `:-`
 | `QUALITY` | `5` | ffmpeg JPEG quality, from `2` (best, largest files) to `31` (worst, smallest). Values around `5`–`9` work best; heavier frames decode more slowly. |
 
 ---
+
+<a id="controls"></a>
 
 ## 🎛️ Controls
 
